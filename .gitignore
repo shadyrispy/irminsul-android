@@ -1,0 +1,23 @@
+# Gradle
+.gradle/
+build/
+app/build/
+
+# Rust
+rust-parser/target/
+rust-parser/Cargo.lock
+auto-artifactarium/target/
+
+# Android
+*.apk
+*.ap_
+*.dex
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
