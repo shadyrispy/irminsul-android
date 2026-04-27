@@ -1,19 +1,26 @@
 package com.github.konkers.irminsul
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Intent
+import android.os.Build
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 
 @AndroidEntryPoint
 class CaptureService : LifecycleService() {
 
     companion object {
         private const val TAG = "CaptureService"
+        private const val CHANNEL_ID = "irminsul_capture_channel"
+        private const val NOTIFICATION_ID = 1
+        
         const val ACTION_CAPTURE_STARTED = "com.github.konkers.irminsul.CAPTURE_STARTED"
         const val ACTION_CAPTURE_STOPPED = "com.github.konkers.irminsul.CAPTURE_STOPPED"
         const val ACTION_PACKET_CAPTURED = "com.github.konkers.irminsul.PACKET_CAPTURED"
@@ -24,6 +31,7 @@ class CaptureService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
+        createNotificationChannel()
         Log.i(TAG, "Capture service created")
     }
 
@@ -36,6 +44,9 @@ class CaptureService : LifecycleService() {
         }
 
         isCapturing = true
+
+        // Android 8+ 必须调用 startForeground()，且在 onCreate 后5秒内
+        startForeground(NOTIFICATION_ID, createNotification("准备中..."))
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -51,6 +62,9 @@ class CaptureService : LifecycleService() {
 
     private fun startCapture() {
         Log.i(TAG, "Starting packet capture...")
+
+        // 更新通知
+        updateNotification("正在捕获原神数据包...")
 
         sendBroadcast(Intent(ACTION_CAPTURE_STARTED))
 
@@ -155,6 +169,36 @@ class CaptureService : LifecycleService() {
         sendBroadcast(Intent(ACTION_CAPTURE_STOPPED))
         Log.i(TAG, "Capture service destroyed")
         super.onDestroy()
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Irminsul 数据捕获",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "原神数据包捕获服务通知"
+            }
+            val manager = getSystemService(NotificationManager::class.java)
+            manager?.createNotificationChannel(channel)
+        }
+    }
+
+    private fun createNotification(contentText: String): Notification {
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Irminsul")
+            .setContentText(contentText)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .build()
+    }
+
+    private fun updateNotification(contentText: String) {
+        val notification = createNotification(contentText)
+        val manager = getSystemService(NotificationManager::class.java)
+        manager?.notify(NOTIFICATION_ID, notification)
     }
 
     private external fun nativeStartCapture(vpnFd: Int): Boolean

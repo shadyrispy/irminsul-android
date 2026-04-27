@@ -20,18 +20,37 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.github.konkers.irminsul.ui.theme.IrminsulTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.*
+import java.io.File
+import java.net.URL
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
+        private const val BASE_URL = "https://github.com/konkers/auto-artifactarium/raw/refs/heads/main/game_data"
+        private val GAME_DATA_FILES = listOf(
+            "gi_keys.json",
+            "TextMapCHS.json",
+            "AvatarExcelConfigData.json",
+            "WeaponExcelConfigData.json",
+            "MaterialExcelConfigData.json",
+            "ReliquaryExcelConfigData.json",
+            "ReliquaryMainPropExcelConfigData.json"
+        )
     }
 
     private var isCapturing by mutableStateOf(false)
     private var captureStats by mutableStateOf(CaptureStatsData())
+    
+    // 初始化状态
+    private var isInitializing by mutableStateOf(true)
+    private var initProgress by mutableStateOf(0f)
+    private var initStatus by mutableStateOf("检查数据文件...")
 
     data class CaptureStatsData(
         val totalPackets: Long = 0,
@@ -93,14 +112,24 @@ class MainActivity : ComponentActivity() {
             // 安全加载原生库
             loadNativeLibraries()
 
+            // 检查并初始化数据文件
+            checkAndInitializeData()
+
             setContent {
                 com.github.konkers.irminsul.ui.theme.IrminsulTheme {
-                    MainScreen(
-                        isCapturing = isCapturing,
-                        stats = captureStats,
-                        onStartCapture = { checkVpnPermissionAndStart() },
-                        onStopCapture = { stopCaptureService() }
-                    )
+                    if (isInitializing) {
+                        InitializationScreen(
+                            progress = initProgress,
+                            status = initStatus
+                        )
+                    } else {
+                        MainScreen(
+                            isCapturing = isCapturing,
+                            stats = captureStats,
+                            onStartCapture = { checkVpnPermissionAndStart() },
+                            onStopCapture = { stopCaptureService() }
+                        )
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -108,11 +137,11 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this, "启动崩溃: ${e.message}", Toast.LENGTH_LONG).show()
             // 仍然显示一个简单的错误界面，而不是闪退
             setContent {
-                androidx.compose.foundation.layout.Box(
+                Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    androidx.compose.material3.Text(
+                    Text(
                         text = "启动失败: ${e.message}",
                         color = MaterialTheme.colorScheme.error
                     )
@@ -148,6 +177,127 @@ class MainActivity : ComponentActivity() {
             Log.i(TAG, "Parser initialized successfully")
         } catch (e: Exception) {
             Log.w(TAG, "Parser initialization skipped", e)
+        }
+    }
+
+    private fun checkAndInitializeData() {
+        val dataDir = File(filesDir, "game_data")
+        val needsDownload = GAME_DATA_FILES.any { file ->
+            !File(dataDir, file).exists()
+        }
+
+        if (needsDownload) {
+            Log.i(TAG, "Game data files missing, starting download")
+            downloadGameData()
+        } else {
+            Log.i(TAG, "Game data files already exist")
+            isInitializing = false
+        }
+    }
+
+    private fun downloadGameData() {
+        CoroutineScope(Dispatchers.Main).launch {
+            try {
+                val dataDir = File(filesDir, "game_data")
+                if (!dataDir.exists()) {
+                    dataDir.mkdirs()
+                }
+
+                initStatus = "准备下载数据文件..."
+                initProgress = 0f
+
+                for ((index, fileName) in GAME_DATA_FILES.withIndex()) {
+                    initStatus = "正在下载: $fileName"
+                    initProgress = (index.toFloat() / GAME_DATA_FILES.size)
+
+                    downloadFile("$BASE_URL/$fileName", File(dataDir, fileName))
+                    Log.i(TAG, "Downloaded $fileName")
+                }
+
+                initProgress = 1.0f
+                initStatus = "初始化完成"
+                delay(500) // 短暂显示完成状态
+
+                isInitializing = false
+                Toast.makeText(this@MainActivity, "数据初始化完成", Toast.LENGTH_SHORT).show()
+                Log.i(TAG, "Game data initialization completed")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to download game data", e)
+                initStatus = "初始化失败: ${e.message}"
+                Toast.makeText(this@MainActivity, "数据下载失败: ${e.message}", Toast.LENGTH_LONG).show()
+                // 即使失败也允许进入主界面，但功能可能受限
+                delay(2000)
+                isInitializing = false
+            }
+        }
+    }
+
+    private suspend fun downloadFile(url: String, outputFile: File) {
+        withContext(Dispatchers.IO) {
+            try {
+                val connection = URL(url).openConnection()
+                connection.connect()
+
+                connection.getInputStream().use { input ->
+                    outputFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to download $url", e)
+                throw e
+            }
+        }
+    }
+
+    @Composable
+    fun InitializationScreen(progress: Float, status: String) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = "Irminsul",
+                    style = MaterialTheme.typography.headlineLarge
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Genshin Impact Packet Capture",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(48.dp))
+
+                CircularProgressIndicator(
+                    progress = progress
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = status,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+
+                if (progress > 0) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "${(progress * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 
@@ -288,7 +438,7 @@ class MainActivity : ComponentActivity() {
     private fun startCaptureService() {
         Log.i(TAG, "Starting capture service")
         val intent = Intent(this, CaptureService::class.java)
-        startForegroundService(intent)
+        ContextCompat.startForegroundService(this, intent)
         Toast.makeText(this, "开始捕获数据", Toast.LENGTH_SHORT).show()
     }
 
