@@ -82,25 +82,41 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        try {
+            val filter = IntentFilter().apply {
+                addAction(CaptureService.ACTION_CAPTURE_STARTED)
+                addAction(CaptureService.ACTION_CAPTURE_STOPPED)
+                addAction(CaptureService.ACTION_STATS_UPDATED)
+            }
+            registerReceiver(statsReceiver, filter)
 
-        val filter = IntentFilter().apply {
-            addAction(CaptureService.ACTION_CAPTURE_STARTED)
-            addAction(CaptureService.ACTION_CAPTURE_STOPPED)
-            addAction(CaptureService.ACTION_STATS_UPDATED)
-        }
-        registerReceiver(statsReceiver, filter)
+            // 安全加载原生库
+            loadNativeLibraries()
 
-        // 安全加载原生库
-        loadNativeLibraries()
-
-        setContent {
-            IrminsulTheme {
-                MainScreen(
-                    isCapturing = isCapturing,
-                    stats = captureStats,
-                    onStartCapture = { checkVpnPermissionAndStart() },
-                    onStopCapture = { stopCaptureService() }
-                )
+            setContent {
+                com.github.konkers.irminsul.ui.theme.IrminsulTheme {
+                    MainScreen(
+                        isCapturing = isCapturing,
+                        stats = captureStats,
+                        onStartCapture = { checkVpnPermissionAndStart() },
+                        onStopCapture = { stopCaptureService() }
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "onCreate crashed", e)
+            Toast.makeText(this, "启动崩溃: ${e.message}", Toast.LENGTH_LONG).show()
+            // 仍然显示一个简单的错误界面，而不是闪退
+            setContent {
+                androidx.compose.foundation.layout.Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    androidx.compose.material3.Text(
+                        text = "启动失败: ${e.message}",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
             }
         }
     }

@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- 空主题，完全由 Compose Material3 控制 -->
     <style name="Theme.Irminsul" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>
