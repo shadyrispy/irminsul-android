@@ -11,9 +11,68 @@ permissions:
   contents: read
 
 jobs:
-  # ──────────────────────────────────────
-  # Job 1: Rust 测试
-  # ──────────────────────────────────────
+  # ────────────────────────────────────
+  # Job 1: 生成游戏数据库（有缓存）
+  # ────────────────────────────────────
+  prepare-data:
+    name: Prepare Game Data
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.get-commit.outputs.commit }}
+      cache-key: ${{ steps.cache-db.outputs.cache-hit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Get target commit
+        id: get-commit
+        run: |
+          COMMIT="${{ vars.GENSHIN_DATA_COMMIT }}"
+          if [ -z "$COMMIT" ]; then
+            COMMIT=$(git ls-tree HEAD anime-game-data | awk '{print $3}')
+          fi
+          echo "commit=$COMMIT" >> $GITHUB_OUTPUT
+          echo "Target commit: ${COMMIT:0:8}"
+
+      # 缓存 database.json：key = commit hash
+      - name: Restore database.json cache
+        id: cache-db
+        uses: actions/cache@v4
+        with:
+          path: app/src/main/assets/game_data/database.json
+          key: db-${{ steps.get-commit.outputs.commit }}
+
+      # 缓存未命中才重新生成
+      - name: Set up Python
+        if: steps.cache-db.outputs.cache-hit != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download & build database
+        if: steps.cache-db.outputs.cache-hit != 'true'
+        run: |
+          python3 scripts/build_database.py ${{ steps.get-commit.outputs.commit }} \
+            app/src/main/assets/game_data/database.json
+          echo "${{ steps.get-commit.outputs.commit }}" > app/src/main/assets/game_data/VERSION
+
+      - name: Verify database.json
+        run: |
+          ls -lh app/src/main/assets/game_data/database.json
+          cat app/src/main/assets/game_data/VERSION
+
+      - name: Upload database artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-database
+          path: app/src/main/assets/game_data/database.json
+          retention-days: 7
+
+  # ────────────────────────────────────
+  # Job 2: Rust 测试（有缓存）
+  # ────────────────────────────────────
   rust-test:
     name: Rust Test
     runs-on: ubuntu-latest
@@ -26,6 +85,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      # 缓存 Rust target/：key = Cargo.lock 的 hash
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
         with:
@@ -37,61 +97,9 @@ jobs:
         working-directory: rust-parser
         run: cargo test --verbose
 
-  # ──────────────────────────────────────
-  # Job 2: 检查游戏 JSON 数据是否完整
-  # ──────────────────────────────────────
-  check-game-data:
-    name: Check Game Data
-    runs-on: ubuntu-latest
-    outputs:
-      data-version: ${{ steps.get-version.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Check game data files
-        id: get-version
-        run: |
-          echo "=== Checking game data in repo ==="
-          VERSION_FILE="app/src/main/assets/game_data/VERSION"
-          if [ ! -f "$VERSION_FILE" ]; then
-            echo "ERROR: VERSION file not found in repo"
-            echo "Run ./sync-game-data.sh locally and commit the result"
-            exit 1
-          fi
-
-          VERSION=$(cat "$VERSION_FILE")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Game data version: ${VERSION:0:8}"
-
-          # 检查所有 JSON 文件是否存在
-          MISSING=0
-          for f in AvatarExcelConfigData.json WeaponExcelConfigData.json \
-                     MaterialExcelConfigData.json ReliquaryExcelConfigData.json \
-                     ReliquaryMainPropExcelConfigData.json \
-                     AvatarSkillDepotExcelConfigData.json DisplayItemExcelConfigData.json; do
-            if [ ! -f "app/src/main/assets/game_data/$f" ]; then
-              echo "MISSING: $f"
-              MISSING=$((MISSING+1))
-            fi
-          done
-          if [ ! -f "app/src/main/assets/game_data/TextMap/TextMapCHS.json" ]; then
-            echo "MISSING: TextMap/TextMapCHS.json"
-            MISSING=$((MISSING+1))
-          fi
-
-          if [ "$MISSING" -gt 0 ]; then
-            echo "ERROR: $MISSING JSON file(s) missing from assets/game_data/"
-            echo "Run: ./sync-game-data.sh <commit-hash> locally, then git add + commit"
-            exit 1
-          fi
-          echo "✅ All game data files present"
-          ls -lh app/src/main/assets/game_data/
-
-  # ──────────────────────────────────────
-  # Job 3: 编译 Rust ARM 库
-  # ──────────────────────────────────────
+  # ────────────────────────────────────
+  # Job 3: 编译 Rust ARM 库（有缓存）
+  # ────────────────────────────────────
   rust-build:
     name: Rust Build (${{ matrix.abi }})
     runs-on: ubuntu-latest
@@ -152,17 +160,23 @@ jobs:
           path: rust-parser/target/${{ matrix.target }}/release/libirminsul_android_parser.so
           retention-days: 1
 
-  # ──────────────────────────────────────
-  # Job 4: 构建 APK + 验证
-  # ──────────────────────────────────────
+  # ────────────────────────────────────
+  # Job 4: 构建 APK（有缓存）
+  # ────────────────────────────────────
   android-build:
     name: Build & Verify APK
     runs-on: ubuntu-latest
-    needs: [check-game-data, rust-build]
+    needs: [prepare-data, rust-build]
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
+      - name: Download game database
+        uses: actions/download-artifact@v4
+        with:
+          name: game-database
+          path: app/src/main/assets/game_data/
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -178,6 +192,18 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
+
+      # 缓存 Gradle build/：key = build.gradle 的 hash
+      - name: Cache Gradle build
+        uses: actions/cache@v4
+        with:
+          path: |
+            app/build
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-build-${{ hashFiles('**/*.gradle', '**/*.gradle.kts') }}
+          restore-keys: |
+            gradle-build-
 
       - name: Download Rust libraries
         uses: actions/download-artifact@v4
@@ -202,49 +228,15 @@ jobs:
       - name: Build Release APK
         run: ./gradlew assembleRelease
 
-      - name: Verify APK contents
+      - name: Verify APK size
         run: |
-          BUILD_TOOLS="$ANDROID_HOME/build-tools/34.0.0"
           RELEASE_APK="app/build/outputs/apk/release/app-release.apk"
-          DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
-
-          echo "=== APK files ==="
-          ls -lh app/build/outputs/apk/release/ app/build/outputs/apk/debug/
-
-          echo ""
-          echo "=== Release APK package info ==="
-          $BUILD_TOOLS/aapt dump badging "$RELEASE_APK" 2>&1 | head -5
-
-          echo ""
-          echo "=== Release APK permissions ==="
-          $BUILD_TOOLS/aapt dump permissions "$RELEASE_APK" 2>&1
-
-          echo ""
-          echo "=== Checking required files in APK ==="
-          $BUILD_TOOLS/aapt list "$RELEASE_APK" > /tmp/apk_contents.txt
-          for file in AndroidManifest.xml classes.dex resources.arsc; do
-            if grep -q "$file" /tmp/apk_contents.txt; then
-              echo "✅ Found: $file"
-            else
-              echo "❌ Missing: $file"
-              exit 1
-            fi
-          done
-
-          echo ""
-          echo "=== Checking game data in APK ==="
-          if grep -q "TextMapCHS.json" /tmp/apk_contents.txt; then
-            echo "✅ Game data found in APK"
-            grep "ExcelConfigData" /tmp/apk_contents.txt
-          else
-            echo "⚠️ WARNING: Game data not found in APK (will be downloaded at first launch)"
-          fi
-
-          echo ""
-          echo "=== APK size check ==="
           SIZE_BYTES=$(stat -c%s "$RELEASE_APK")
           SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1048576" | bc)
           echo "Release APK: ${SIZE_MB} MB"
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release APK**: ${SIZE_MB} MB" >> $GITHUB_STEP_SUMMARY
           if [ "$SIZE_BYTES" -gt 52428800 ]; then
             echo "❌ APK too large (limit: 50 MB)"
             exit 1
@@ -266,23 +258,3 @@ jobs:
           name: app-release
           path: app/build/outputs/apk/release/*.apk
           retention-days: 30
-
-      - name: Build summary
-        if: always()
-        run: |
-          BUILD_TOOLS="$ANDROID_HOME/build-tools/34.0.0"
-          RELEASE_APK="app/build/outputs/apk/release/app-release.apk"
-
-          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          if [ -f "$RELEASE_APK" ]; then
-            SIZE=$(ls -lh "$RELEASE_APK" | awk '{print $5}')
-            echo "✅ **Release APK**: $SIZE" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            $BUILD_TOOLS/aapt dump badging "$RELEASE_APK" 2>&1 | head -3 >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Release APK: failed" >> $GITHUB_STEP_SUMMARY
-          fi

@@ -18,7 +18,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -26,10 +25,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.github.konkers.irminsul.data.GameDatabase
 import com.github.konkers.irminsul.ui.theme.IrminsulTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
-import org.json.JSONObject
 import java.io.File
 
 @AndroidEntryPoint
@@ -44,12 +44,7 @@ class MainActivity : ComponentActivity() {
     private var isCapturing by mutableStateOf(false)
     private var captureStats by mutableStateOf(CaptureStatsData())
 
-    // 初始化状态
-    private var isInitializing by mutableStateOf(true)
-    private var initProgress by mutableStateOf(0f)
-    private var initStatus by mutableStateOf("正在加载数据文件...")
-
-    // 解析到的游戏数据状态（模仿 irminsul 的 DataUpdated）
+    // 解析到的游戏数据状态
     private var dataUpdated by mutableStateOf(DataUpdated())
 
     // 标记接收器是否已注册
@@ -95,7 +90,7 @@ class MainActivity : ComponentActivity() {
                 CaptureService.ACTION_STATS_UPDATED -> {
                     val json = intent.getStringExtra("stats_json") ?: return
                     try {
-                        val obj = JSONObject(json)
+                        val obj = org.json.JSONObject(json)
                         captureStats = CaptureStatsData(
                             totalPackets = obj.optLong("total_packets", 0),
                             genshinPackets = obj.optLong("genshin_packets", 0),
@@ -109,7 +104,6 @@ class MainActivity : ComponentActivity() {
                 }
                 CaptureService.ACTION_PACKET_CAPTURED -> {
                     val packetType = intent.getStringExtra("packet_type") ?: "unknown"
-                    // 根据解析到的数据类型更新 UI 状态（模仿 irminsul）
                     when (packetType) {
                         "character" -> dataUpdated = dataUpdated.copy(characters = true)
                         "item" -> dataUpdated = dataUpdated.copy(items = true)
@@ -117,7 +111,7 @@ class MainActivity : ComponentActivity() {
                         "weapon" -> dataUpdated = dataUpdated.copy(items = true)
                         "artifact" -> dataUpdated = dataUpdated.copy(items = true)
                     }
-                    Log.i(TAG, "Packet parsed: $packetType, data: ${intent.getStringExtra("parsed_data")?.take(100)}")
+                    Log.i(TAG, "Packet parsed: $packetType")
                 }
             }
         }
@@ -141,40 +135,57 @@ class MainActivity : ComponentActivity() {
             receiverRegistered = true
 
             loadNativeLibraries()
-            checkDataVersion()
 
             setContent {
                 IrminsulTheme {
-                    if (isInitializing) {
-                        InitializationScreen(
-                            progress = initProgress,
-                            status = initStatus
-                        )
-                    } else {
-                        IrminsulMainScreen(
-                            isCapturing = isCapturing,
-                            stats = captureStats,
-                            dataUpdated = dataUpdated,
-                            onStartCapture = { checkVpnPermissionAndStart() },
-                            onStopCapture = { stopCaptureService() }
-                        )
+                    val viewModel: MainViewModel = viewModel()
+                    val loadState by viewModel.loadState.collectAsState(initial = LoadState.Idle)
+
+                    LaunchedEffect(Unit) {
+                        viewModel.loadDatabase()
+                    }
+
+                    when (val state = loadState) {
+                        is LoadState.Idle -> {
+                            Box(Modifier.fillMaxSize(), Alignment.Center) {
+                                CircularProgressIndicator()
+                            }
+                        }
+                        is LoadState.Loading -> {
+                            InitializationScreen(progress = 0.1f, status = "正在加载游戏数据...")
+                        }
+                        is LoadState.Error -> {
+                            Column(
+                                Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.Center,
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text("加载数据失败", color = MaterialTheme.colorScheme.error)
+                                Text(state.message, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                        is LoadState.Success -> {
+                            // 数据库加载成功，显示主界面
+                            val dbDataUpdated = DataUpdated(
+                                characters = state.db.character_map?.isNotEmpty() == true,
+                                items = state.db.weapon_map?.isNotEmpty() == true
+                                        || state.db.artifact_map?.isNotEmpty() == true,
+                                achievements = false
+                            )
+                            IrminsulMainScreen(
+                                isCapturing = isCapturing,
+                                stats = captureStats,
+                                dataUpdated = dbDataUpdated,
+                                onStartCapture = { checkVpnPermissionAndStart() },
+                                onStopCapture = { stopCaptureService() }
+                            )
+                        }
                     }
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "onCreate crashed", e)
             Toast.makeText(this, "启动崩溃: ${e.message}", Toast.LENGTH_LONG).show()
-            setContent {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "启动失败: ${e.message}",
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            }
         }
     }
 
@@ -191,48 +202,6 @@ class MainActivity : ComponentActivity() {
         } catch (e: UnsatisfiedLinkError) {
             Log.w(TAG, "Parser init skipped (native not available)", e)
         }
-    }
-
-    private fun checkDataVersion() {
-        val assetsVersion = try {
-            assets.open("game_data/VERSION").bufferedReader().use { it.readText().trim() }
-        } catch (e: Exception) { null }
-
-        val dataDir = File(filesDir, "game_data")
-        val localVersionFile = File(dataDir, "VERSION")
-        val localVersion = if (localVersionFile.exists()) localVersionFile.readText().trim() else null
-
-        if (assetsVersion != null && assetsVersion != localVersion) {
-            initStatus = "正在安装数据文件..."
-            initProgress = 0f
-            try {
-                dataDir.mkdirs()
-                val assetFiles = listOf(
-                    "gi_keys.json",
-                    "TextMapCHS.json",
-                    "AvatarExcelConfigData.json",
-                    "WeaponExcelConfigData.json",
-                    "MaterialExcelConfigData.json",
-                    "ReliquaryExcelConfigData.json",
-                    "ReliquaryMainPropExcelConfigData.json"
-                )
-                for ((index, name) in assetFiles.withIndex()) {
-                    initProgress = (index.toFloat() / assetFiles.size)
-                    assets.open("game_data/$name").use { input ->
-                        File(dataDir, name).outputStream().use { output ->
-                            input.copyTo(output)
-                        }
-                    }
-                    Log.i(TAG, "Copied asset: $name")
-                }
-                // 写入版本文件
-                localVersionFile.writeText(assetsVersion)
-                Log.i(TAG, "Data installed: $assetsVersion")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to install data", e)
-            }
-        }
-        isInitializing = false
     }
 
     // === VPN / Service 控制 ===
@@ -290,10 +259,6 @@ class MainActivity : ComponentActivity() {
                 LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth(0.6f))
                 Spacer(Modifier.height(16.dp))
                 Text(status, style = MaterialTheme.typography.bodyMedium)
-                if (progress > 0) {
-                    Spacer(Modifier.height(8.dp))
-                    Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
             }
         }
     }
@@ -309,13 +274,13 @@ class MainActivity : ComponentActivity() {
         Box(
             modifier = Modifier.fillMaxSize()
         ) {
-            // 深色背景（模仿 irminsul 的 dark theme）
+            // 深色背景
             Surface(
                 modifier = Modifier.fillMaxSize(),
                 color = Color(0xFF1a1a2e)
             ) {}
 
-            // 主内容（居中，模仿 irminsul）
+            // 主内容
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -368,7 +333,7 @@ class MainActivity : ComponentActivity() {
 
                 Spacer(Modifier.height(24.dp))
 
-                // 数据状态卡片（模仿 irminsul 的 Items/Characters/Achievements 显示）
+                // 数据状态卡片
                 Card(
                     modifier = Modifier.fillMaxWidth(0.9f),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF2d2d42).copy(alpha = 0.8f))
@@ -395,7 +360,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // 底部版本号（模仿 irminsul 的右下角版本显示）
+            // 右下角版本号
             Text(
                 text = VERSION,
                 style = MaterialTheme.typography.labelSmall,

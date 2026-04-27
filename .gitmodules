@@ -2,3 +2,6 @@
 	path = auto-artifactarium
 	url = https://github.com/konkers/auto-artifactarium.git
 	branch = main
+[submodule "anime-game-data"]
+	path = anime-game-data
+	url = https://github.com/konkers/anime-game-data.git
