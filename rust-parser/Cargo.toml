@@ -13,23 +13,16 @@ auto-artifactarium = { path = "../auto-artifactarium" }
 # JNI 支持
 jni = "0.21.1"
 
-# JSON 序列化
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+# Protobuf（与 auto-artifactarium 保持版本一致）
+protobuf = "3.7"
 
 # 日志
 log = "0.4"
 android_logger = "0.14"
 
-# 懒加载全局变量
-lazy_static = "1.4"
-
-# Base64 编码
-base64 = "0.22"
-
 [profile.release]
-opt-level = "z"     # 优化体积
-lto = true          # 链接时优化
-codegen-units = 1   # 单编译单元，更好的优化
-strip = true        # 去除符号信息
-panic = "abort"     # 减小二进制体积
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
