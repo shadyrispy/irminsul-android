@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -16,15 +17,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.github.konkers.irminsul.ui.theme.IrminsulTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import java.io.File
+import java.net.HttpURLConnection
 import java.net.URL
 
 @AndroidEntryPoint
@@ -46,11 +47,14 @@ class MainActivity : ComponentActivity() {
 
     private var isCapturing by mutableStateOf(false)
     private var captureStats by mutableStateOf(CaptureStatsData())
-    
+
     // 初始化状态
     private var isInitializing by mutableStateOf(true)
     private var initProgress by mutableStateOf(0f)
     private var initStatus by mutableStateOf("检查数据文件...")
+
+    // 标记接收器是否已注册
+    private var receiverRegistered = false
 
     data class CaptureStatsData(
         val totalPackets: Long = 0,
@@ -107,7 +111,13 @@ class MainActivity : ComponentActivity() {
                 addAction(CaptureService.ACTION_CAPTURE_STOPPED)
                 addAction(CaptureService.ACTION_STATS_UPDATED)
             }
-            registerReceiver(statsReceiver, filter)
+            // Android 14+ 必须指定接收器导出标志
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                registerReceiver(statsReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(statsReceiver, filter)
+            }
+            receiverRegistered = true
 
             // 安全加载原生库
             loadNativeLibraries()
@@ -116,7 +126,7 @@ class MainActivity : ComponentActivity() {
             checkAndInitializeData()
 
             setContent {
-                com.github.konkers.irminsul.ui.theme.IrminsulTheme {
+                IrminsulTheme {
                     if (isInitializing) {
                         InitializationScreen(
                             progress = initProgress,
@@ -135,7 +145,6 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "onCreate crashed", e)
             Toast.makeText(this, "启动崩溃: ${e.message}", Toast.LENGTH_LONG).show()
-            // 仍然显示一个简单的错误界面，而不是闪退
             setContent {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -151,7 +160,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun loadNativeLibraries() {
-        // 先加载 Rust 解析器库
+        // 加载 Rust 解析器库（可选，加载失败不影响启动）
         try {
             System.loadLibrary("irminsul_android_parser")
             Log.i(TAG, "Rust parser library loaded successfully")
@@ -161,20 +170,12 @@ class MainActivity : ComponentActivity() {
             Log.w(TAG, "Error loading Rust parser library", e)
         }
 
-        // C++ 捕获引擎（可选）
-        try {
-            System.loadLibrary("capture_engine")
-            Log.i(TAG, "Capture engine library loaded successfully")
-        } catch (e: UnsatisfiedLinkError) {
-            Log.w(TAG, "Capture engine library not found, using service-level capture", e)
-        } catch (e: Exception) {
-            Log.w(TAG, "Error loading capture engine library", e)
-        }
-
-        // 初始化解析器
+        // 初始化解析器（可选）
         try {
             nativeInitParser()
             Log.i(TAG, "Parser initialized successfully")
+        } catch (e: UnsatisfiedLinkError) {
+            Log.w(TAG, "Parser init not available", e)
         } catch (e: Exception) {
             Log.w(TAG, "Parser initialization skipped", e)
         }
@@ -196,7 +197,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun downloadGameData() {
-        CoroutineScope(Dispatchers.Main).launch {
+        // 使用 lifecycleScope，随 Activity 生命周期自动取消
+        lifecycleScope.launch {
             try {
                 val dataDir = File(filesDir, "game_data")
                 if (!dataDir.exists()) {
@@ -216,16 +218,18 @@ class MainActivity : ComponentActivity() {
 
                 initProgress = 1.0f
                 initStatus = "初始化完成"
-                delay(500) // 短暂显示完成状态
+                delay(500)
 
                 isInitializing = false
                 Toast.makeText(this@MainActivity, "数据初始化完成", Toast.LENGTH_SHORT).show()
                 Log.i(TAG, "Game data initialization completed")
+            } catch (e: CancellationException) {
+                // 协程被取消（Activity 销毁），不需要处理
+                Log.i(TAG, "Download cancelled")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to download game data", e)
                 initStatus = "初始化失败: ${e.message}"
-                Toast.makeText(this@MainActivity, "数据下载失败: ${e.message}", Toast.LENGTH_LONG).show()
-                // 即使失败也允许进入主界面，但功能可能受限
+                // 即使失败也允许进入主界面
                 delay(2000)
                 isInitializing = false
             }
@@ -234,18 +238,43 @@ class MainActivity : ComponentActivity() {
 
     private suspend fun downloadFile(url: String, outputFile: File) {
         withContext(Dispatchers.IO) {
+            var connection: HttpURLConnection? = null
             try {
-                val connection = URL(url).openConnection()
-                connection.connect()
+                connection = (URL(url).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 15000  // 15秒连接超时
+                    readTimeout = 60000     // 60秒读取超时
+                    instanceFollowRedirects = true
+                }
 
-                connection.getInputStream().use { input ->
+                // 处理 HTTP 重定向（GitHub raw 链接会 301 重定向）
+                var responseCode = connection.responseCode
+                var redirectCount = 0
+                while ((responseCode == HttpURLConnection.HTTP_MOVED_PERM ||
+                            responseCode == HttpURLConnection.HTTP_MOVED_TEMP ||
+                            responseCode == HttpURLConnection.HTTP_SEE_OTHER) &&
+                    redirectCount < 5
+                ) {
+                val redirectUrl = connection?.headerFields?.get("Location")?.firstOrNull() ?: break
+                connection?.disconnect()
+                connection = (URL(redirectUrl).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 15000
+                    readTimeout = 60000
+                }
+                responseCode = connection?.responseCode ?: break
+                    redirectCount++
+                }
+
+                if (responseCode != HttpURLConnection.HTTP_OK) {
+                    throw Exception("HTTP $responseCode for $url")
+                }
+
+                connection?.inputStream?.use { input ->
                     outputFile.outputStream().use { output ->
                         input.copyTo(output)
                     }
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to download $url", e)
-                throw e
+            } finally {
+                connection?.disconnect()
             }
         }
     }
@@ -278,8 +307,9 @@ class MainActivity : ComponentActivity() {
 
                 Spacer(modifier = Modifier.height(48.dp))
 
-                CircularProgressIndicator(
-                    progress = progress
+                LinearProgressIndicator(
+                    progress = progress,
+                    modifier = Modifier.fillMaxWidth(0.6f)
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -450,9 +480,17 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        super.onDestroy()
-        unregisterReceiver(statsReceiver)
+        // 安全注销接收器
+        if (receiverRegistered) {
+            try {
+                unregisterReceiver(statsReceiver)
+            } catch (e: IllegalArgumentException) {
+                Log.w(TAG, "Receiver was not registered", e)
+            }
+            receiverRegistered = false
+        }
         stopCaptureService()
+        super.onDestroy()
     }
 
     private external fun nativeInitParser(): Boolean
