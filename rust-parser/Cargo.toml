@@ -1,38 +1,35 @@
 [package]
-name = "auto-artifactarium"
+name = "irminsul-android-parser"
 version = "0.1.0"
 edition = "2021"
 
-# 说明：这个库是 auto-artifactarium 的 Rust 绑定
-# 实际功能由 auto-artifactarium 子模块提供
-
 [lib]
-crate-type = ["cdylib"]  # 生成 C 兼容的动态库
+crate-type = ["cdylib"]
 
 [dependencies]
-# auto-artifactarium 依赖 (从 git 仓库引用)
-auto-artifactarium = { git = "https://github.com/konkers/auto-artifactarium" }
-
-# JSON 序列化/反序列化
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+# 本地依赖 auto-artifactarium（通过 submodule）
+auto-artifactarium = { path = "../auto-artifactarium" }
 
 # JNI 支持
 jni = "0.21.1"
 
+# JSON 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
 # 日志
 log = "0.4"
-android_logger = "0.13"
+android_logger = "0.14"
 
-[build-dependencies]
-# 如果有 protobuf 编译需求
-protobuf = "3.2"
+# 懒加载全局变量
+lazy_static = "1.4"
+
+# Base64 编码
+base64 = "0.22"
 
 [profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-
-[features]
-default = []
-logging = ["android_logger"]
+opt-level = "z"     # 优化体积
+lto = true          # 链接时优化
+codegen-units = 1   # 单编译单元，更好的优化
+strip = true        # 去除符号信息
+panic = "abort"     # 减小二进制体积
