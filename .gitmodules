@@ -1,0 +1,4 @@
+[submodule "auto-artifactarium"]
+	path = auto-artifactarium
+	url = https://github.com/konkers/auto-artifactarium.git
+	branch = main

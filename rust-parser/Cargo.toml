@@ -1,0 +1,38 @@
+[package]
+name = "auto-artifactarium"
+version = "0.1.0"
+edition = "2021"
+
+# 说明：这个库是 auto-artifactarium 的 Rust 绑定
+# 实际功能由 auto-artifactarium 子模块提供
+
+[lib]
+crate-type = ["cdylib"]  # 生成 C 兼容的动态库
+
+[dependencies]
+# auto-artifactarium 依赖 (从 git 仓库引用)
+auto-artifactarium = { git = "https://github.com/konkers/auto-artifactarium" }
+
+# JSON 序列化/反序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# JNI 支持
+jni = "0.21.1"
+
+# 日志
+log = "0.4"
+android_logger = "0.13"
+
+[build-dependencies]
+# 如果有 protobuf 编译需求
+protobuf = "3.2"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[features]
+default = []
+logging = ["android_logger"]

@@ -1,0 +1,24 @@
+// settings.gradle
+// 项目设置，包含 submodule 配置
+
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        google()
+        mavenCentral()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+// 包含 auto-artifactarium 作为 submodule
+// 注意：这个 submodule 需要先通过 git submodule add 添加
+include ':app'
+
+rootProject.name = "irminsul-android"
