@@ -178,30 +178,6 @@ jobs:
           echo "=== jniLibs contents ==="
           find app/src/main/jniLibs -type f -exec ls -lh {} \;
 
-      - name: Generate release keystore
-        run: |
-          which keytool || echo "keytool not found"
-          java -version 2>&1 || true
-          ls -la app/ | head -5
-          keytool -genkeypair -v \
-            -keystore app/release.keystore \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -alias release \
-            -storepass irminsul123 \
-            -keypass irminsul123 \
-            -dname "CN=Irminsul,O=GitHub Actions,C=US" 2>&1
-
-      - name: Create keystore.properties
-        run: |
-          cat > keystore.properties << 'EOF'
-          storeFile=app/release.keystore
-          storePassword=irminsul123
-          keyAlias=release
-          keyPassword=irminsul123
-          EOF
-
       - name: Build Debug APK
         run: |
           echo "ndk.path=$ANDROID_HOME/ndk/25.2.9519653" >> local.properties
