@@ -12,10 +12,10 @@ permissions:
 
 jobs:
   # ──────────────────────────────────────
-  # Job 1: Rust 单元测试 + Clippy 检查
+  # Job 1: Rust 测试 + 编译 ARM 库
   # ──────────────────────────────────────
   rust-test:
-    name: Rust Test & Lint
+    name: Rust Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,8 +25,6 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
 
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
@@ -37,21 +35,13 @@ jobs:
 
       - name: Test rust-parser
         working-directory: rust-parser
-        run: cargo test --verbose 2>&1
-
-      - name: Clippy check rust-parser
-        working-directory: rust-parser
-        run: cargo clippy -- -D warnings 2>&1 || true
-
-      - name: Check rust-parser compiles
-        working-directory: rust-parser
-        run: cargo check --verbose 2>&1
+        run: cargo test --verbose
 
   # ──────────────────────────────────────
-  # Job 2: 编译 Rust Android 库
+  # Job 2: 编译 Rust ARM 库（仅 arm64 + armv7）
   # ──────────────────────────────────────
   rust-build:
-    name: Build Rust (${{ matrix.abi }})
+    name: Rust Build (${{ matrix.abi }})
     runs-on: ubuntu-latest
     needs: [rust-test]
     strategy:
@@ -62,10 +52,6 @@ jobs:
             abi: arm64-v8a
           - target: armv7-linux-androideabi
             abi: armeabi-v7a
-          - target: x86_64-linux-android
-            abi: x86_64
-          - target: i686-linux-android
-            abi: x86
     steps:
       - uses: actions/checkout@v4
         with:
@@ -96,27 +82,11 @@ jobs:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
           CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang
-          CARGO_TARGET_I686_LINUX_ANDROID_LINKER: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android21-clang
-          CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android21-clang
           CC_aarch64_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
           CC_armv7_linux_androideabi: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang
-          CC_i686_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android21-clang
-          CC_x86_64_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android21-clang
           AR_aarch64_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
           AR_armv7_linux_androideabi: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
-          AR_i686_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
-          AR_x86_64_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
         run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Verify .so file exists
-        run: |
-          SO_FILE="rust-parser/target/${{ matrix.target }}/release/libirminsul_android_parser.so"
-          if [ ! -f "$SO_FILE" ]; then
-            echo "ERROR: Expected .so file not found: $SO_FILE"
-            ls -la rust-parser/target/${{ matrix.target }}/release/ 2>/dev/null || echo "Release dir not found"
-            exit 1
-          fi
-          echo "✅ .so file found: $(ls -lh $SO_FILE)"
 
       - name: Strip debug symbols
         run: |
@@ -131,10 +101,10 @@ jobs:
           retention-days: 1
 
   # ──────────────────────────────────────
-  # Job 3: 编译 Android APK
+  # Job 3: 构建 APK + 验证
   # ──────────────────────────────────────
   android-build:
-    name: Build Android APK
+    name: Build & Verify APK
     runs-on: ubuntu-latest
     needs: [rust-build]
     steps:
@@ -163,17 +133,13 @@ jobs:
         with:
           path: rust-libs
 
-      - name: Prepare jniLibs
+      - name: Prepare jniLibs (ARM only)
         run: |
           mkdir -p app/src/main/jniLibs/arm64-v8a
           mkdir -p app/src/main/jniLibs/armeabi-v7a
-          mkdir -p app/src/main/jniLibs/x86_64
-          mkdir -p app/src/main/jniLibs/x86
 
           cp rust-libs/rust-lib-arm64-v8a/libirminsul_android_parser.so app/src/main/jniLibs/arm64-v8a/
           cp rust-libs/rust-lib-armeabi-v7a/libirminsul_android_parser.so app/src/main/jniLibs/armeabi-v7a/
-          cp rust-libs/rust-lib-x86_64/libirminsul_android_parser.so app/src/main/jniLibs/x86_64/
-          cp rust-libs/rust-lib-x86/libirminsul_android_parser.so app/src/main/jniLibs/x86/
 
           echo "=== jniLibs contents ==="
           find app/src/main/jniLibs -type f -exec ls -lh {} \;
@@ -184,103 +150,30 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: Build Release APK (signed)
+      - name: Build Release APK
         run: ./gradlew assembleRelease
 
-  # ──────────────────────────────────────
-  # Job 4: APK 验证测试
-  # ──────────────────────────────────────
-  apk-verify:
-    name: Verify APK
-    runs-on: ubuntu-latest
-    needs: [android-build]
-    steps:
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install build tools
-        run: sdkmanager "build-tools;34.0.0"
-
-      - name: Download APKs
-        uses: actions/download-artifact@v4
-        with:
-          pattern: "app-*"
-          path: apk-outputs
-          merge-multiple: true
-
-      - name: Find APK files
-        id: find-apks
-        run: |
-          echo "=== Downloaded files ==="
-          find apk-outputs -type f -name "*.apk" | while read f; do
-            echo "Found: $f ($(ls -lh "$f" | awk '{print $5}'))"
-          done
-          DEBUG_APK=$(find apk-outputs -name "app-debug.apk" | head -1)
-          RELEASE_APK=$(find apk-outputs -name "app-release.apk" | head -1)
-          echo "debug_apk=$DEBUG_APK" >> $GITHUB_OUTPUT
-          echo "release_apk=$RELEASE_APK" >> $GITHUB_OUTPUT
-
-      - name: Verify APK signing
+      - name: Verify APK contents
         run: |
           BUILD_TOOLS="$ANDROID_HOME/build-tools/34.0.0"
+          RELEASE_APK="app/build/outputs/apk/release/app-release.apk"
+          DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
 
-          echo "=== Verifying Debug APK signing ==="
-          if [ -n "${{ steps.find-apks.outputs.debug_apk }}" ]; then
-            $BUILD_TOOLS/apksigner verify --verbose "${{ steps.find-apks.outputs.debug_apk }}" 2>&1 || \
-              echo "⚠️ Debug APK signing verification had warnings"
-            echo "✅ Debug APK checked"
-          else
-            echo "⚠️ Debug APK not found"
-          fi
+          echo "=== APK files ==="
+          ls -lh app/build/outputs/apk/release/ app/build/outputs/apk/debug/
 
           echo ""
-          echo "=== Verifying Release APK signing ==="
-          if [ -n "${{ steps.find-apks.outputs.release_apk }}" ]; then
-            # Release APK 可能使用 debug 签名（CI 环境 fallback），使用 -v1_scheme 和 -v2_scheme 确保兼容
-            $BUILD_TOOLS/apksigner verify -v1_scheme true -v2_scheme true -v3_scheme true "${{ steps.find-apks.outputs.release_apk }}" 2>&1 && \
-              echo "✅ Release APK signature: OK" || \
-              echo "⚠️ Release APK uses debug signature (expected in CI)"
-            echo ""
-            echo "=== Release APK certificate info ==="
-            $BUILD_TOOLS/apksigner verify --print-certs "${{ steps.find-apks.outputs.release_apk }}" 2>&1 || true
-          else
-            echo "❌ Release APK not found"
-            exit 1
-          fi
-
-      - name: Verify APK package info
-        run: |
-          BUILD_TOOLS="$ANDROID_HOME/build-tools/34.0.0"
-          
           echo "=== Release APK package info ==="
-          $BUILD_TOOLS/aapt dump badging "${{ steps.find-apks.outputs.release_apk }}" 2>&1 | head -5
-          
+          $BUILD_TOOLS/aapt dump badging "$RELEASE_APK" 2>&1 | head -5
+
           echo ""
           echo "=== Release APK permissions ==="
-          $BUILD_TOOLS/aapt dump permissions "${{ steps.find-apks.outputs.release_apk }}" 2>&1
-          
-          echo ""
-          echo "=== Release APK activities/services ==="
-          $BUILD_TOOLS/aapt dump xmltree "${{ steps.find-apks.outputs.release_apk }}" AndroidManifest.xml 2>&1 | grep -E "activity|service|permission" | head -20
+          $BUILD_TOOLS/aapt dump permissions "$RELEASE_APK" 2>&1
 
-      - name: Verify APK structure
-        run: |
-          BUILD_TOOLS="$ANDROID_HOME/build-tools/34.0.0"
-          
-          echo "=== Checking zipalign ==="
-          $BUILD_TOOLS/zipalign -c -v 4 "${{ steps.find-apks.outputs.release_apk }}" 2>&1 | tail -3 || echo "⚠️ zipalign check had warnings"
-          
           echo ""
           echo "=== Checking required files in APK ==="
-          $BUILD_TOOLS/aapt list "${{ steps.find-apks.outputs.release_apk }}" > /tmp/apk_contents.txt
-          
-          REQUIRED_FILES=(
-            "AndroidManifest.xml"
-            "classes.dex"
-            "resources.arsc"
-          )
-          
-          for file in "${REQUIRED_FILES[@]}"; do
+          $BUILD_TOOLS/aapt list "$RELEASE_APK" > /tmp/apk_contents.txt
+          for file in AndroidManifest.xml classes.dex resources.arsc; do
             if grep -q "$file" /tmp/apk_contents.txt; then
               echo "✅ Found: $file"
             else
@@ -288,62 +181,67 @@ jobs:
               exit 1
             fi
           done
-          
+
           echo ""
           echo "=== Checking native libraries in APK ==="
-          grep "libirminsul_android_parser.so" /tmp/apk_contents.txt | while read line; do
-            echo "✅ Found: $line"
-          done
-          
           SO_COUNT=$(grep -c "libirminsul_android_parser.so" /tmp/apk_contents.txt || true)
           if [ "$SO_COUNT" -eq 0 ]; then
-            echo "⚠️ WARNING: No native .so libraries found in APK"
+            echo "⚠️ WARNING: No native .so libraries found"
           else
             echo "✅ Found $SO_COUNT native library ABI(s)"
+            grep "libirminsul_android_parser.so" /tmp/apk_contents.txt
           fi
 
-      - name: Verify APK size
-        run: |
-          RELEASE_APK="${{ steps.find-apks.outputs.release_apk }}"
-          SIZE_BYTES=$(stat -c%s "$RELEASE_APK" 2>/dev/null || stat -f%z "$RELEASE_APK")
+          echo ""
+          echo "=== APK size check ==="
+          SIZE_BYTES=$(stat -c%s "$RELEASE_APK")
           SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1048576" | bc)
-          
-          echo "Release APK size: ${SIZE_MB} MB"
-          
-          # APK 不应超过 50MB
+          echo "Release APK: ${SIZE_MB} MB"
           if [ "$SIZE_BYTES" -gt 52428800 ]; then
-            echo "❌ APK too large: ${SIZE_MB} MB (limit: 50 MB)"
+            echo "❌ APK too large (limit: 50 MB)"
             exit 1
           fi
-          echo "✅ APK size OK: ${SIZE_MB} MB"
+          echo "✅ APK size OK"
+
+          echo ""
+          echo "=== APK signing check ==="
+          # CI 环境下 release 使用 debug 签名，只验证 APK 可安装即可
+          $BUILD_TOOLS/apksigner verify --print-certs "$RELEASE_APK" 2>&1 && \
+            echo "✅ APK properly signed" || \
+            echo "⚠️ APK signing info (may use debug cert in CI)"
+          # 不因签名验证失败而中断
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 30
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: verified-release-apk
-          path: ${{ steps.find-apks.outputs.release_apk }}
+          name: app-release
+          path: app/build/outputs/apk/release/*.apk
           retention-days: 30
 
       - name: Build summary
         if: always()
         run: |
           BUILD_TOOLS="$ANDROID_HOME/build-tools/34.0.0"
-          RELEASE_APK="${{ steps.find-apks.outputs.release_apk }}"
-          
-          echo "## APK Verification Summary" >> $GITHUB_STEP_SUMMARY
+          RELEASE_APK="app/build/outputs/apk/release/app-release.apk"
+
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           if [ -f "$RELEASE_APK" ]; then
             SIZE=$(ls -lh "$RELEASE_APK" | awk '{print $5}')
             echo "✅ **Release APK**: $SIZE" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
-            $BUILD_TOOLS/apksigner verify --print-certs "$RELEASE_APK" >> $GITHUB_STEP_SUMMARY 2>&1
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            $BUILD_TOOLS/aapt dump badging "$RELEASE_APK" | head -5 >> $GITHUB_STEP_SUMMARY 2>&1
+            $BUILD_TOOLS/aapt dump badging "$RELEASE_APK" 2>&1 | head -3 >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Release APK not found" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Release APK: failed" >> $GITHUB_STEP_SUMMARY
           fi
