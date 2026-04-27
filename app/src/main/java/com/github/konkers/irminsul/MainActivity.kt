@@ -21,16 +21,18 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.github.konkers.irminsul.ui.theme.IrminsulTheme
+import dagger.hilt.android.AndroidEntryPoint
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
-    
+
     companion object {
         private const val TAG = "MainActivity"
     }
-    
+
     private var isCapturing by mutableStateOf(false)
     private var captureStats by mutableStateOf(CaptureStatsData())
-    
+
     data class CaptureStatsData(
         val totalPackets: Long = 0,
         val genshinPackets: Long = 0,
@@ -38,7 +40,7 @@ class MainActivity : ComponentActivity() {
         val bytesCaptured: Long = 0,
         val elapsedSeconds: Double = 0.0
     )
-    
+
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -48,8 +50,7 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this, "需要 VPN 权限才能捕获数据", Toast.LENGTH_SHORT).show()
         }
     }
-    
-    // 统计广播接收器
+
     private val statsReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
@@ -78,28 +79,20 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        // 注册广播接收器
+
         val filter = IntentFilter().apply {
             addAction(CaptureService.ACTION_CAPTURE_STARTED)
             addAction(CaptureService.ACTION_CAPTURE_STOPPED)
             addAction(CaptureService.ACTION_STATS_UPDATED)
         }
         registerReceiver(statsReceiver, filter)
-        
-        // 初始化原生库
-        try {
-            System.loadLibrary("capture_engine")
-            nativeInitParser()
-            Log.i(TAG, "Native libraries loaded successfully")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to load native libraries", e)
-            Toast.makeText(this, "加载原生库失败: ${e.message}", Toast.LENGTH_LONG).show()
-        }
-        
+
+        // 安全加载原生库
+        loadNativeLibraries()
+
         setContent {
             IrminsulTheme {
                 MainScreen(
@@ -111,7 +104,37 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    
+
+    private fun loadNativeLibraries() {
+        // 先加载 Rust 解析器库
+        try {
+            System.loadLibrary("irminsul_android_parser")
+            Log.i(TAG, "Rust parser library loaded successfully")
+        } catch (e: UnsatisfiedLinkError) {
+            Log.w(TAG, "Rust parser library not found, packet parsing disabled", e)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error loading Rust parser library", e)
+        }
+
+        // C++ 捕获引擎（可选）
+        try {
+            System.loadLibrary("capture_engine")
+            Log.i(TAG, "Capture engine library loaded successfully")
+        } catch (e: UnsatisfiedLinkError) {
+            Log.w(TAG, "Capture engine library not found, using service-level capture", e)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error loading capture engine library", e)
+        }
+
+        // 初始化解析器
+        try {
+            nativeInitParser()
+            Log.i(TAG, "Parser initialized successfully")
+        } catch (e: Exception) {
+            Log.w(TAG, "Parser initialization skipped", e)
+        }
+    }
+
     @Composable
     fun MainScreen(
         isCapturing: Boolean,
@@ -131,21 +154,20 @@ class MainActivity : ComponentActivity() {
                 verticalArrangement = Arrangement.Center
             ) {
                 Text(
-                    text = "irminsul-android",
+                    text = "Irminsul",
                     style = MaterialTheme.typography.headlineLarge
                 )
-                
+
                 Spacer(modifier = Modifier.height(8.dp))
-                
+
                 Text(
                     text = "Genshin Impact Packet Capture",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                
+
                 Spacer(modifier = Modifier.height(32.dp))
-                
-                // 状态卡片
+
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier.padding(16.dp),
@@ -154,16 +176,15 @@ class MainActivity : ComponentActivity() {
                         Text(
                             text = if (isCapturing) "● 正在捕获数据" else "○ 准备就绪",
                             style = MaterialTheme.typography.titleMedium,
-                            color = if (isCapturing) 
-                                MaterialTheme.colorScheme.primary 
-                            else 
+                            color = if (isCapturing)
+                                MaterialTheme.colorScheme.primary
+                            else
                                 MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        
+
                         if (isCapturing) {
                             Spacer(modifier = Modifier.height(12.dp))
-                            
-                            // 统计信息
+
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
@@ -172,9 +193,9 @@ class MainActivity : ComponentActivity() {
                                 StatItem("原神包", "${stats.genshinPackets}")
                                 StatItem("过滤", "${stats.filteredPackets}")
                             }
-                            
+
                             Spacer(modifier = Modifier.height(8.dp))
-                            
+
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
@@ -185,19 +206,18 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(32.dp))
-                
-                // 控制按钮
+
                 Button(
                     onClick = if (isCapturing) onStopCapture else onStartCapture,
                     modifier = Modifier.fillMaxWidth(0.8f)
                 ) {
                     Text(if (isCapturing) "停止捕获" else "开始捕获")
                 }
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
-                
+
                 OutlinedButton(
                     onClick = {
                         Toast.makeText(this@MainActivity, "数据查看功能开发中", Toast.LENGTH_SHORT).show()
@@ -209,7 +229,7 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    
+
     @Composable
     fun StatItem(label: String, value: String) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -225,7 +245,7 @@ class MainActivity : ComponentActivity() {
             )
         }
     }
-    
+
     private fun formatBytes(bytes: Long): String {
         return when {
             bytes < 1024 -> "$bytes B"
@@ -233,13 +253,13 @@ class MainActivity : ComponentActivity() {
             else -> "${bytes / (1024 * 1024)} MB"
         }
     }
-    
+
     private fun formatTime(seconds: Double): String {
         val mins = (seconds / 60).toInt()
         val secs = (seconds % 60).toInt()
         return if (mins > 0) "${mins}m${secs}s" else "${secs}s"
     }
-    
+
     private fun checkVpnPermissionAndStart() {
         val intent = VpnService.prepare(this)
         if (intent != null) {
@@ -248,26 +268,26 @@ class MainActivity : ComponentActivity() {
             startCaptureService()
         }
     }
-    
+
     private fun startCaptureService() {
         Log.i(TAG, "Starting capture service")
         val intent = Intent(this, CaptureService::class.java)
         startForegroundService(intent)
         Toast.makeText(this, "开始捕获数据", Toast.LENGTH_SHORT).show()
     }
-    
+
     private fun stopCaptureService() {
         Log.i(TAG, "Stopping capture service")
         val intent = Intent(this, CaptureService::class.java)
         stopService(intent)
         Toast.makeText(this, "停止捕获数据", Toast.LENGTH_SHORT).show()
     }
-    
+
     override fun onDestroy() {
         super.onDestroy()
         unregisterReceiver(statsReceiver)
         stopCaptureService()
     }
-    
+
     private external fun nativeInitParser(): Boolean
 }
