@@ -180,6 +180,9 @@ jobs:
 
       - name: Generate release keystore
         run: |
+          which keytool || echo "keytool not found"
+          java -version 2>&1 || true
+          ls -la app/ | head -5
           keytool -genkeypair -v \
             -keystore app/release.keystore \
             -keyalg RSA \
@@ -188,7 +191,7 @@ jobs:
             -alias release \
             -storepass irminsul123 \
             -keypass irminsul123 \
-            -dname "CN=Irminsul,O=GitHub Actions,C=US"
+            -dname "CN=Irminsul,O=GitHub Actions,C=US" 2>&1
 
       - name: Create keystore.properties
         run: |
