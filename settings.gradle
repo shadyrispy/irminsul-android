@@ -1,5 +1,5 @@
 // settings.gradle
-// 项目设置，包含 submodule 配置
+// 项目设置
 
 pluginManagement {
     repositories {
@@ -7,31 +7,16 @@ pluginManagement {
         google()
         mavenCentral()
     }
-    resolutionStrategy {
-        eachPlugin {
-            if (requested.id.id == 'com.android.application') {
-                useVersion('8.5.0')
-            }
-            if (requested.id.id == 'org.jetbrains.kotlin.android') {
-                useVersion('1.9.24')
-            }
-            if (requested.id.id == 'com.google.dagger.hilt.android') {
-                useVersion('2.50')
-            }
-        }
-    }
 }
 
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         google()
         mavenCentral()
     }
 }
 
-// 包含 auto-artifactarium 作为 submodule
-// 注意：这个 submodule 需要先通过 git submodule add 添加
 include ':app'
 
 rootProject.name = "irminsul-android"

@@ -21,3 +21,4 @@ auto-artifactarium/target/
 # OS
 .DS_Store
 Thumbs.db
+local.properties

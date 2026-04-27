@@ -25,8 +25,6 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
 
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
@@ -34,14 +32,6 @@ jobs:
           workspaces: |
             rust-parser -> target
             auto-artifactarium -> target
-
-      - name: Check formatting
-        working-directory: rust-parser
-        run: cargo fmt --all -- --check || true
-
-      - name: Run clippy
-        working-directory: rust-parser
-        run: cargo clippy --all-targets -- -D warnings || true
 
       - name: Test rust-parser
         working-directory: rust-parser
@@ -59,16 +49,12 @@ jobs:
         include:
           - target: aarch64-linux-android
             abi: arm64-v8a
-            api: 21
           - target: armv7-linux-androideabi
             abi: armeabi-v7a
-            api: 21
           - target: x86_64-linux-android
             abi: x86_64
-            api: 21
           - target: i686-linux-android
             abi: x86
-            api: 21
     steps:
       - uses: actions/checkout@v4
         with:
@@ -97,18 +83,14 @@ jobs:
         working-directory: rust-parser
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${{ matrix.api }}-clang
-          CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi${{ matrix.api }}-clang
-          CARGO_TARGET_I686_LINUX_ANDROID_LINKER: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android${{ matrix.api }}-clang
-          CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android${{ matrix.api }}-clang
-          CC_aarch64_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${{ matrix.api }}-clang
-          CC_armv7_linux_androideabi: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi${{ matrix.api }}-clang
-          CC_i686_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android${{ matrix.api }}-clang
-          CC_x86_64_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android${{ matrix.api }}-clang
-          CXX_aarch64_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${{ matrix.api }}-clang++
-          CXX_armv7_linux_androideabi: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi${{ matrix.api }}-clang++
-          CXX_i686_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android${{ matrix.api }}-clang++
-          CXX_x86_64_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android${{ matrix.api }}-clang++
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
+          CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang
+          CARGO_TARGET_I686_LINUX_ANDROID_LINKER: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android21-clang
+          CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android21-clang
+          CC_aarch64_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
+          CC_armv7_linux_androideabi: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang
+          CC_i686_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android21-clang
+          CC_x86_64_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android21-clang
           AR_aarch64_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
           AR_armv7_linux_androideabi: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
           AR_i686_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
@@ -149,11 +131,8 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Setup Android NDK
-        uses: nttld/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: r25c
+      - name: Install Android SDK components
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;25.2.9519653"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
@@ -175,36 +154,14 @@ jobs:
           cp rust-libs/rust-lib-x86_64/libirminsul_android_parser.so app/src/main/jniLibs/x86_64/
           cp rust-libs/rust-lib-x86/libirminsul_android_parser.so app/src/main/jniLibs/x86/
 
-          echo "=== jniLibs contents ==="
-          find app/src/main/jniLibs -type f -exec ls -lh {} \;
-
-      - name: Create gradlew if missing
-        run: |
-          if [ ! -f gradlew ]; then
-            echo "Creating minimal gradle wrapper..."
-            mkdir -p gradle/wrapper
-            cat > gradle/wrapper/gradle-wrapper.properties << 'GWP'
-            distributionUrl=https\://services.gradle.org/distributions/gradle-8.5-bin.zip
-            distributionBase=GRADLE_USER_HOME
-            distributionPath=wrapper/dists
-            zipStoreBase=GRADLE_USER_HOME
-            zipStorePath=wrapper/dists
-          GWP
-            curl -sL https://raw.githubusercontent.com/gradle/gradle/v8.5.0/gradlew -o gradlew
-            chmod +x gradlew
-          fi
-
       - name: Build Debug APK
         run: |
-          echo "ndk.path=${{ steps.setup-ndk.outputs.ndk-path }}" >> local.properties
-          ./gradlew assembleDebug 2>&1 || {
-            echo "=== Gradle build failed, checking project structure ==="
-            find . -name "*.gradle" -o -name "*.kts" | head -20
-            exit 1
-          }
+          echo "ndk.path=$ANDROID_HOME/ndk/25.2.9519653" >> local.properties
+          chmod +x gradlew
+          ./gradlew assembleDebug
 
       - name: Build Release APK
-        run: ./gradlew assembleRelease 2>&1 || true
+        run: ./gradlew assembleRelease || true
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
@@ -226,16 +183,8 @@ jobs:
         if: always()
         run: |
           echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
           if ls app/build/outputs/apk/debug/*.apk 1>/dev/null 2>&1; then
             echo "✅ Debug APK built successfully" >> $GITHUB_STEP_SUMMARY
-            ls -lh app/build/outputs/apk/debug/*.apk >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
           else
             echo "❌ Debug APK build failed" >> $GITHUB_STEP_SUMMARY
-          fi
-          if ls app/build/outputs/apk/release/*.apk 1>/dev/null 2>&1; then
-            echo "✅ Release APK built successfully" >> $GITHUB_STEP_SUMMARY
-            ls -lh app/build/outputs/apk/release/*.apk >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
-          else
-            echo "⚠️ Release APK build skipped or failed" >> $GITHUB_STEP_SUMMARY
           fi
