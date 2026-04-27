@@ -7,6 +7,22 @@ pluginManagement {
         google()
         mavenCentral()
     }
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == 'com.android.application') {
+                useVersion('8.5.0')
+            }
+            if (requested.id.id == 'org.jetbrains.kotlin.android') {
+                useVersion('1.9.24')
+            }
+            if (requested.id.id == 'kotlin-kapt') {
+                useVersion('1.9.24')
+            }
+            if (requested.id.id == 'com.google.dagger.hilt.android') {
+                useVersion('2.50')
+            }
+        }
+    }
 }
 
 dependencyResolutionManagement {
