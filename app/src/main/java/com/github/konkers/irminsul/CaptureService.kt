@@ -1,13 +1,12 @@
 package com.github.konkers.irminsul
 
 import android.content.Intent
-import android.os.Bundle
 import android.util.Log
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 class CaptureService : LifecycleService() {
     
@@ -16,10 +15,10 @@ class CaptureService : LifecycleService() {
         const val ACTION_CAPTURE_STARTED = "com.github.konkers.irminsul.CAPTURE_STARTED"
         const val ACTION_CAPTURE_STOPPED = "com.github.konkers.irminsul.CAPTURE_STOPPED"
         const val ACTION_PACKET_CAPTURED = "com.github.konkers.irminsul.PACKET_CAPTURED"
+        const val ACTION_STATS_UPDATED = "com.github.konkers.irminsul.STATS_UPDATED"
     }
     
     private var isCapturing = false
-    private var captureThread: Thread? = null
     
     override fun onCreate() {
         super.onCreate()
@@ -36,7 +35,6 @@ class CaptureService : LifecycleService() {
         
         isCapturing = true
         
-        // 启动捕获协程
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 startCapture()
@@ -49,15 +47,13 @@ class CaptureService : LifecycleService() {
         return START_NOT_STICKY
     }
     
-    private suspend fun startCapture() {
+    private fun startCapture() {
         Log.i(TAG, "Starting packet capture...")
         
-        // 发送广播通知捕获开始
-        val startIntent = Intent(ACTION_CAPTURE_STARTED)
-        sendBroadcast(startIntent)
+        sendBroadcast(Intent(ACTION_CAPTURE_STARTED))
         
         // 启动原生捕获
-        val result = nativeStartCapture(0) // TODO: 获取实际的 VPN fd
+        val result = nativeStartCapture(0)
         
         if (!result) {
             Log.e(TAG, "Failed to start native capture")
@@ -65,61 +61,116 @@ class CaptureService : LifecycleService() {
             return
         }
         
-        // 模拟捕获循环（实际应由原生代码回调）
-        captureThread = Thread {
-            var packetCount = 0
-            
+        // 设置默认过滤规则（仅原神流量）
+        nativeSetFilter(
+            true,           // enabled
+            true,           // filterByPort
+            intArrayOf(22101), // ports
+            false,          // filterByProtocol
+            0               // protocol (unused)
+        )
+        
+        // 定时查询统计信息
+        lifecycleScope.launch(Dispatchers.IO) {
             while (isCapturing) {
                 try {
-                    // 模拟数据包捕获
-                    Thread.sleep(100) // 100ms
-                    
-                    // 模拟偶尔捕获到数据包
-                    if (Math.random() < 0.1) { // 10% 概率
-                        packetCount++
-                        
-                        // 发送广播通知捕获到数据包
-                        val packetIntent = Intent(ACTION_PACKET_CAPTURED).apply {
-                            putExtra("packet_count", packetCount)
-                            putExtra("timestamp", System.currentTimeMillis())
+                    val statsJson = nativeGetStats()
+                    if (statsJson != null && statsJson.isNotEmpty()) {
+                        val statsIntent = Intent(ACTION_STATS_UPDATED).apply {
+                            putExtra("stats_json", statsJson)
                         }
-                        sendBroadcast(packetIntent)
-                        
-                        Log.d(TAG, "Packet captured: $packetCount")
+                        sendBroadcast(statsIntent)
                     }
+                    Thread.sleep(2000) // 每 2 秒更新一次统计
                 } catch (e: InterruptedException) {
                     break
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error in capture loop", e)
+                    Log.e(TAG, "Error polling stats", e)
                 }
             }
         }
+    }
+    
+    /**
+     * 批量数据包回调（C++ 层通过 epoll+batch 回调）
+     * 签名: nativeOnPacketsCaptured([[B)V
+     */
+    @Suppress("unused")
+    private fun nativeOnPacketsCaptured(packets: Array<ByteArray>) {
+        if (packets.isEmpty()) return
         
-        captureThread?.start()
+        Log.d(TAG, "Batch received: ${packets.size} packets")
+        
+        for (packet in packets) {
+            // 调用 Rust 解析器解析每个数据包
+            val parseResult = nativeParsePacket(packet)
+            
+            if (parseResult != null && parseResult.isNotEmpty() && parseResult != "{}") {
+                // 发送广播通知 UI 层
+                val packetIntent = Intent(ACTION_PACKET_CAPTURED).apply {
+                    putExtra("parsed_data", parseResult)
+                    putExtra("packet_size", packet.size)
+                    putExtra("timestamp", System.currentTimeMillis())
+                }
+                sendBroadcast(packetIntent)
+            }
+        }
+    }
+    
+    /**
+     * 单包回调（兼容旧版，C++ 层回退使用）
+     * 签名: nativeOnPacketCaptured([B)Z
+     */
+    @Suppress("unused")
+    private fun nativeOnPacketCaptured(packet: ByteArray): Boolean {
+        val parseResult = nativeParsePacket(packet)
+        
+        if (parseResult != null && parseResult.isNotEmpty() && parseResult != "{}") {
+            val packetIntent = Intent(ACTION_PACKET_CAPTURED).apply {
+                putExtra("parsed_data", parseResult)
+                putExtra("packet_size", packet.size)
+                putExtra("timestamp", System.currentTimeMillis())
+            }
+            sendBroadcast(packetIntent)
+            return true
+        }
+        return false
     }
     
     override fun onDestroy() {
         Log.i(TAG, "Capture service destroying")
         
         isCapturing = false
-        
-        // 停止原生捕获
         nativeStopCapture()
         
-        // 等待捕获线程结束
-        captureThread?.interrupt()
-        captureThread?.join(1000)
-        
-        // 发送广播通知捕获停止
-        val stopIntent = Intent(ACTION_CAPTURE_STOPPED)
-        sendBroadcast(stopIntent)
+        sendBroadcast(Intent(ACTION_CAPTURE_STOPPED))
         
         Log.i(TAG, "Capture service destroyed")
         super.onDestroy()
     }
     
+    // ──────────────────────────────────────────
     // JNI 方法
+    // ──────────────────────────────────────────
+    
+    // 启动捕获
     private external fun nativeStartCapture(vpnFd: Int): Boolean
+    
+    // 停止捕获
     private external fun nativeStopCapture(): Boolean
+    
+    // 解析数据包
     private external fun nativeParsePacket(packetData: ByteArray): String?
+    
+    // 获取捕获统计（JSON 格式）
+    private external fun nativeGetStats(): String?
+    
+    // 设置过滤规则
+    private external fun nativeSetFilter(
+        enabled: Boolean,
+        filterByPort: Boolean,
+        ports: IntArray,
+        filterByProtocol: Boolean,
+        protocol: Int
+    )
 }

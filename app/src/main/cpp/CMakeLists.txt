@@ -1,11 +1,9 @@
 cmake_minimum_required(VERSION 3.22.1)
 project("irminsul-android")
 
-# 设置 C++ 标准
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Android 配置
 set(ANDROID_ABI ${CMAKE_ANDROID_ARCH_ABI})
 
 # 查找 Android NDK 库
@@ -26,11 +24,10 @@ endif()
 
 message(STATUS "Configuring for ABI: ${ANDROID_ABI}, Rust target: ${RUST_TARGET}")
 
-# 查找 Rust 库 (auto-artifactarium)
+# 查找 Rust 库
 set(RUST_LIB_PATH "")
 set(RUST_LIB_FOUND FALSE)
 
-# 可能的库路径
 set(RUST_LIB_PATHS
     "${CMAKE_SOURCE_DIR}/../../auto-artifactarium/target/${RUST_TARGET}/release"
     "${CMAKE_SOURCE_DIR}/../auto-artifactarium/target/${RUST_TARGET}/release"
@@ -55,10 +52,10 @@ add_library(capture_engine SHARED
 # 包含目录
 target_include_directories(capture_engine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${ANDROID_NDK}/sysroot/usr/include
+    ${CMAKE_ANDROID_NDK}/sysroot/usr/include
 )
 
-# 链接库
+# 链接库（pthread 在 Android NDK 中内置于 libc）
 target_link_libraries(capture_engine
     ${ANDROID_LOG_LIB}
     ${ANDROID_ANDROID_LIB}
@@ -76,12 +73,18 @@ if(RUST_LIB_FOUND)
     message(STATUS "Will copy Rust library after build")
 endif()
 
-# 设置编译选项
+# 编译选项
 target_compile_options(capture_engine PRIVATE
-    -Wall
-    -Wextra
+    -Wall -Wextra -Werror
     $<$<CONFIG:Release>:-O3>
     $<$<CONFIG:Debug>:-g>
+    -fno-exceptions        # 减少二进制大小
+    -fno-rtti
+)
+
+# 链接选项：strip 符号表减少体积
+target_link_options(capture_engine PRIVATE
+    $<$<CONFIG:Release>:-s>
 )
 
 message(STATUS "CMake configuration completed for ${ANDROID_ABI}")
