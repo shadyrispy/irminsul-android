@@ -160,8 +160,36 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: Build Release APK
-        run: ./gradlew assembleRelease || true
+      - name: Build Release APK (signed)
+        run: ./gradlew assembleRelease
+
+      - name: Verify APK signing
+        run: |
+          echo "=== Verifying Debug APK ==="
+          $ANDROID_HOME/build-tools/34.0.0/apksigner verify app/build/outputs/apk/debug/app-debug.apk
+          echo "Debug APK signature: OK"
+
+          echo "=== Verifying Release APK ==="
+          $ANDROID_HOME/build-tools/34.0.0/apksigner verify app/build/outputs/apk/release/app-release.apk
+          echo "Release APK signature: OK"
+
+      - name: Verify APK package info
+        run: |
+          echo "=== Debug APK package info ==="
+          $ANDROID_HOME/build-tools/34.0.0/aapt dump badging app/build/outputs/apk/debug/app-debug.apk | head -3
+
+          echo "=== Release APK package info ==="
+          $ANDROID_HOME/build-tools/34.0.0/aapt dump badging app/build/outputs/apk/release/app-release.apk | head -3
+
+      - name: Verify APK installability (zipalign + structure check)
+        run: |
+          echo "=== Checking zipalign ==="
+          $ANDROID_HOME/build-tools/34.0.0/zipalign -c -v 4 app/build/outputs/apk/release/app-release.apk | tail -1
+
+          echo "=== Checking APK contents ==="
+          $ANDROID_HOME/build-tools/34.0.0/aapt list app/build/outputs/apk/release/app-release.apk | grep -E "AndroidManifest|classes|resources" | head -5
+
+          echo "=== All APK checks passed ==="
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
@@ -183,8 +211,24 @@ jobs:
         if: always()
         run: |
           echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-          if ls app/build/outputs/apk/debug/*.apk 1>/dev/null 2>&1; then
-            echo "✅ Debug APK built successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Debug APK
+          if [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
+            SIZE=$(ls -lh app/build/outputs/apk/debug/app-debug.apk | awk '{print $5}')
+            echo "✅ Debug APK: $SIZE" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Debug APK build failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Debug APK: failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Release APK
+          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
+            SIZE=$(ls -lh app/build/outputs/apk/release/app-release.apk | awk '{print $5}')
+            echo "✅ Release APK (signed): $SIZE" >> $GITHUB_STEP_SUMMARY
+            # 打印签名信息
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            $ANDROID_HOME/build-tools/34.0.0/apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk >> $GITHUB_STEP_SUMMARY 2>&1
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Release APK: failed" >> $GITHUB_STEP_SUMMARY
           fi

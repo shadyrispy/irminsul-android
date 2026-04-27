@@ -5,6 +5,13 @@ apply plugin: 'org.jetbrains.kotlin.android'
 apply plugin: 'kotlin-kapt'
 apply plugin: 'com.google.dagger.hilt.android'
 
+// 签名配置
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace 'com.github.konkers.irminsul'
     compileSdk 34
@@ -21,9 +28,19 @@ android {
             useSupportLibrary true
         }
 
-        // NDK 配置
         ndk {
             abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
+        }
+    }
+
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
         }
     }
 
@@ -31,6 +48,7 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
         }
         debug {
             debuggable true
@@ -64,14 +82,6 @@ android {
             useLegacyPackaging = true
         }
     }
-
-    // 如果有 CMake 原生代码，取消注释以下配置
-    // externalNativeBuild {
-    //     cmake {
-    //         path file('src/main/cpp/CMakeLists.txt')
-    //         version '3.22.1'
-    //     }
-    // }
 
     ndkVersion '25.2.9519653'
 }
