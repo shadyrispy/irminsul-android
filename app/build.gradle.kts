@@ -76,7 +76,6 @@ dependencies {
     implementation(libs.core.ktx)
     implementation(libs.lifecycle.runtime.ktx)
     implementation(libs.lifecycle.viewmodel.compose)
-    implementation(libs.lifecycle.service)
 
     // Compose
     implementation(platform(libs.compose.bom))
