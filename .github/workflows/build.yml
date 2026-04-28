@@ -150,6 +150,9 @@ jobs:
       - name: 授予执行权限
         run: chmod +x gradlew
 
+      - name: Clean 构建
+        run: ./gradlew clean
+
       - name: 创建 Room schema 目录
         run: mkdir -p app/schemas
 
@@ -202,6 +205,9 @@ jobs:
 
       - name: 授予执行权限
         run: chmod +x gradlew
+
+      - name: Clean 构建
+        run: ./gradlew clean
 
       - name: 创建 Room schema 目录
         run: mkdir -p app/schemas
