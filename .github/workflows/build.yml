@@ -1,6 +1,5 @@
 # GitHub Actions 工作流 - Irminsul
 # 原神游戏数据解析 Android 应用
-# 每个 job 都配置了缓存，Rust 代码无改动时跳过编译
 
 name: Build and Release
 
@@ -17,7 +16,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Job 1: Rust 库编译 (仅 ARM 架构)
+  # Job 1: Rust 库编译
   build-rust:
     name: Build Rust (${{ matrix.target }})
     runs-on: ubuntu-latest
@@ -42,14 +41,12 @@ jobs:
         run: |
           RUST_HASH="${{ hashFiles('rustlib/Cargo.toml', 'rustlib/src/**/*.rs') }}"
           echo "rust_hash=$RUST_HASH" >> $GITHUB_OUTPUT
-          echo "Rust hash: $RUST_HASH"
 
       - name: 尝试恢复已编译的 so 文件
         id: restore-so
         uses: actions/cache@v4
         with:
-          path: |
-            rustlib/target/${{ matrix.target }}/release/libirminsul_parser.so
+          path: rustlib/target/${{ matrix.target }}/release/libirminsul_parser.so
           key: rust-so-${{ matrix.target }}-${{ steps.check-rust-changes.outputs.rust_hash }}
 
       - name: 安装 Rust 工具链
@@ -71,8 +68,6 @@ jobs:
             ~/.cargo/git
             rustlib/target
           key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ steps.check-rust-changes.outputs.rust_hash }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ matrix.target }}-
 
       - name: 安装 Android NDK
         if: steps.restore-so.outputs.cache-hit != 'true'
@@ -84,8 +79,7 @@ jobs:
         run: cargo ndk -t ${{ matrix.target }} build --release
 
       - name: 验证 so 文件存在
-        run: |
-          ls -la rustlib/target/${{ matrix.target }}/release/libirminsul_parser.so || exit 1
+        run: ls -la rustlib/target/${{ matrix.target }}/release/libirminsul_parser.so || exit 1
 
       - name: 上传 Rust 库
         uses: actions/upload-artifact@v4
@@ -94,13 +88,11 @@ jobs:
           path: rustlib/target/${{ matrix.target }}/release/libirminsul_parser.so
           retention-days: 30
 
-  # Job 2: 合并 Rust 库到 jniLibs
+  # Job 2: 合并 Rust 库
   merge-rust-libs:
     name: Merge Rust Libraries
     runs-on: ubuntu-latest
     needs: build-rust
-    outputs:
-      jniLibs-hash: ${{ steps.hash.outputs.hash }}
 
     steps:
       - name: 下载所有 Rust 库
@@ -108,27 +100,16 @@ jobs:
         with:
           pattern: rust-lib-*
           path: rust-libs
-          merge-multiple: false
 
       - name: 组织 jniLibs 目录
         run: |
-          mkdir -p jniLibs/arm64-v8a
-          mkdir -p jniLibs/armeabi-v7a
+          mkdir -p jniLibs/arm64-v8a jniLibs/armeabi-v7a
           cp rust-libs/rust-lib-aarch64-linux-android/libirminsul_parser.so jniLibs/arm64-v8a/
           cp rust-libs/rust-lib-armv7-linux-androideabi/libirminsul_parser.so jniLibs/armeabi-v7a/
           chmod +x jniLibs/*/*.so
-          echo "jniLibs contents:"
-          find jniLibs -type f -exec ls -la {} \;
-
-      - name: 计算 jniLibs hash
-        id: hash
-        run: |
-          HASH=$(find jniLibs -type f -exec sha256sum {} \; | sha256sum | cut -d' ' -f1)
-          echo "hash=$HASH" >> $GITHUB_OUTPUT
-          echo "jniLibs hash: $HASH"
 
       - name: 打包 jniLibs
-        run: tar -czvf jniLibs.tar.gz jniLibs
+        run: tar -czf jniLibs.tar.gz jniLibs
 
       - name: 上传 jniLibs
         uses: actions/upload-artifact@v4
@@ -155,7 +136,7 @@ jobs:
 
       - name: 解压 jniLibs
         run: |
-          tar -xzvf jniLibs.tar.gz
+          tar -xzf jniLibs.tar.gz
           mkdir -p app/src/main/jniLibs
           cp -r jniLibs/* app/src/main/jniLibs/
           chmod +x app/src/main/jniLibs/*/*.so
@@ -170,7 +151,14 @@ jobs:
         run: chmod +x gradlew
 
       - name: 构建 Debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log && exit ${PIPESTATUS[0]}
+
+      - name: 上传构建日志（失败时）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-debug-log
+          path: build.log
 
       - name: 上传 Debug APK
         uses: actions/upload-artifact@v4
@@ -179,7 +167,7 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
 
-  # Job 4: 构建 Release APK (仅 main 分支或 tag)
+  # Job 4: 构建 Release APK
   build-release:
     name: Build Release APK
     runs-on: ubuntu-latest
@@ -198,7 +186,7 @@ jobs:
 
       - name: 解压 jniLibs
         run: |
-          tar -xzvf jniLibs.tar.gz
+          tar -xzf jniLibs.tar.gz
           mkdir -p app/src/main/jniLibs
           cp -r jniLibs/* app/src/main/jniLibs/
           chmod +x app/src/main/jniLibs/*/*.so
@@ -213,7 +201,14 @@ jobs:
         run: chmod +x gradlew
 
       - name: 构建 Release APK
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
+        run: ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log && exit ${PIPESTATUS[0]}
+
+      - name: 上传构建日志（失败时）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-release-log
+          path: build.log
 
       - name: 上传 Release APK
         uses: actions/upload-artifact@v4
@@ -222,7 +217,7 @@ jobs:
           path: app/build/outputs/apk/release/*.apk
           retention-days: 90
 
-  # Job 5: 创建 Release (仅 tag)
+  # Job 5: 创建 Release
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
