@@ -166,24 +166,10 @@ jobs:
           java-version: '17'
           distribution: 'zulu'
 
-      - name: 安装 Android NDK
-        uses: android-actions/setup-android@v3
-
-      - name: 缓存 Gradle 依赖
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
-      - name: 授予执行权限
-        run: chmod +x gradlew
-
       - name: 构建 Debug APK
-        run: ./gradlew assembleDebug --no-daemon
+        uses: gradle/gradle-build-action@v3
+        with:
+          arguments: assembleDebug --no-daemon
 
       - name: 上传 Debug APK
         uses: actions/upload-artifact@v4
@@ -222,24 +208,10 @@ jobs:
           java-version: '17'
           distribution: 'zulu'
 
-      - name: 安装 Android NDK
-        uses: android-actions/setup-android@v3
-
-      - name: 缓存 Gradle 依赖
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
-      - name: 授予执行权限
-        run: chmod +x gradlew
-
       - name: 构建 Release APK
-        run: ./gradlew assembleRelease --no-daemon
+        uses: gradle/gradle-build-action@v3
+        with:
+          arguments: assembleRelease --no-daemon
 
       - name: 上传 Release APK
         uses: actions/upload-artifact@v4
