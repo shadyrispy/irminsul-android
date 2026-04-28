@@ -76,6 +76,7 @@ dependencies {
     implementation(libs.core.ktx)
     implementation(libs.lifecycle.runtime.ktx)
     implementation(libs.lifecycle.viewmodel.compose)
+    implementation("androidx.lifecycle:lifecycle-service:2.7.0")
 
     // Compose
     implementation(platform(libs.compose.bom))
