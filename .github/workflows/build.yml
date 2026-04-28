@@ -150,6 +150,9 @@ jobs:
       - name: 授予执行权限
         run: chmod +x gradlew
 
+      - name: 创建 Room schema 目录
+        run: mkdir -p app/schemas
+
       - name: 构建 Debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log && exit ${PIPESTATUS[0]}
 
@@ -199,6 +202,9 @@ jobs:
 
       - name: 授予执行权限
         run: chmod +x gradlew
+
+      - name: 创建 Room schema 目录
+        run: mkdir -p app/schemas
 
       - name: 构建 Release APK
         run: ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log && exit ${PIPESTATUS[0]}
