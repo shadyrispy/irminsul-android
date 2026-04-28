@@ -40,7 +40,6 @@ jobs:
       - name: 检查 Rust 源码是否有改动
         id: check-rust-changes
         run: |
-          # 使用 Cargo.toml 的 hash 作为缓存 key
           RUST_HASH="${{ hashFiles('rustlib/Cargo.toml', 'rustlib/src/**/*.rs') }}"
           echo "rust_hash=$RUST_HASH" >> $GITHUB_OUTPUT
           echo "Rust hash: $RUST_HASH"
@@ -115,10 +114,8 @@ jobs:
         run: |
           mkdir -p jniLibs/arm64-v8a
           mkdir -p jniLibs/armeabi-v7a
-
           cp rust-libs/rust-lib-aarch64-linux-android/libirminsul_parser.so jniLibs/arm64-v8a/
           cp rust-libs/rust-lib-armv7-linux-androideabi/libirminsul_parser.so jniLibs/armeabi-v7a/
-
           chmod +x jniLibs/*/*.so
           echo "jniLibs contents:"
           find jniLibs -type f -exec ls -la {} \;
@@ -169,6 +166,9 @@ jobs:
           java-version: '17'
           distribution: 'zulu'
 
+      - name: 安装 Android NDK
+        uses: android-actions/setup-android@v3
+
       - name: 缓存 Gradle 依赖
         uses: actions/cache@v4
         with:
@@ -183,7 +183,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: 构建 Debug APK
-        run: ./gradlew assembleDebug --no-daemon --no-build-cache
+        run: ./gradlew assembleDebug --no-daemon
 
       - name: 上传 Debug APK
         uses: actions/upload-artifact@v4
@@ -222,6 +222,9 @@ jobs:
           java-version: '17'
           distribution: 'zulu'
 
+      - name: 安装 Android NDK
+        uses: android-actions/setup-android@v3
+
       - name: 缓存 Gradle 依赖
         uses: actions/cache@v4
         with:
@@ -236,7 +239,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: 构建 Release APK
-        run: ./gradlew assembleRelease --no-daemon --no-build-cache
+        run: ./gradlew assembleRelease --no-daemon
 
       - name: 上传 Release APK
         uses: actions/upload-artifact@v4
